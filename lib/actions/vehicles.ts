@@ -4,19 +4,26 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { vehicles } from "@/lib/db/schema";
 import { vehicleSchema } from "@/lib/validations/vehicle";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { requireCurrentUserId } from "@/lib/auth/server";
 
 export async function getVehicles() {
+  const userId = await requireCurrentUserId();
   return db.query.vehicles.findMany({
+    where: eq(vehicles.userId, userId),
     orderBy: (v, { desc }) => [desc(v.createdAt)],
   });
 }
 
 export async function getVehicle(id: string) {
-  return db.query.vehicles.findFirst({ where: eq(vehicles.id, id) });
+  const userId = await requireCurrentUserId();
+  return db.query.vehicles.findFirst({
+    where: and(eq(vehicles.id, id), eq(vehicles.userId, userId)),
+  });
 }
 
 export async function createVehicle(data: unknown) {
+  const userId = await requireCurrentUserId();
   const parsed = vehicleSchema.safeParse(data);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message };
@@ -25,6 +32,7 @@ export async function createVehicle(data: unknown) {
   const [row] = await db
     .insert(vehicles)
     .values({
+      userId,
       name: v.name,
       type: v.type,
       make: v.make || null,
@@ -40,6 +48,7 @@ export async function createVehicle(data: unknown) {
 }
 
 export async function updateVehicle(id: string, data: unknown) {
+  const userId = await requireCurrentUserId();
   const parsed = vehicleSchema.safeParse(data);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message };
@@ -58,14 +67,20 @@ export async function updateVehicle(id: string, data: unknown) {
       tankCapacityLitres: v.tankCapacityLitres ?? null,
       updatedAt: new Date(),
     })
-    .where(eq(vehicles.id, id))
+    .where(and(eq(vehicles.id, id), eq(vehicles.userId, userId)))
     .returning();
+  if (!row) {
+    return { success: false, error: "Vehicle not found" };
+  }
   revalidatePath("/vehicles");
   return { success: true, data: row };
 }
 
 export async function deleteVehicle(id: string) {
-  await db.delete(vehicles).where(eq(vehicles.id, id));
+  const userId = await requireCurrentUserId();
+  await db
+    .delete(vehicles)
+    .where(and(eq(vehicles.id, id), eq(vehicles.userId, userId)));
   revalidatePath("/vehicles");
   return { success: true };
 }

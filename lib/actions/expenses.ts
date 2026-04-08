@@ -1,14 +1,28 @@
 "use server";
 
-import { sql, eq, desc } from "drizzle-orm";
+import { sql, eq, desc, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { tripExpenses, walletTransactions } from "@/lib/db/schema";
+import { tripExpenses, trips, wallets, walletTransactions } from "@/lib/db/schema";
 import { expenseSchema } from "@/lib/validations/expense";
 import { rupeesToPaise } from "@/lib/utils/format";
 import { debitWalletTx } from "@/lib/actions/wallets";
+import { requireCurrentUserId } from "@/lib/auth/server";
+
+async function ownsTrip(userId: string, tripId: string) {
+  const trip = await db.query.trips.findFirst({
+    where: and(eq(trips.id, tripId), eq(trips.userId, userId)),
+    columns: { id: true },
+  });
+  return Boolean(trip);
+}
 
 export async function getExpensesForTrip(tripId: string) {
+  const userId = await requireCurrentUserId();
+  if (!(await ownsTrip(userId, tripId))) {
+    return [];
+  }
+
   return db.query.tripExpenses.findMany({
     where: eq(tripExpenses.tripId, tripId),
     orderBy: [desc(tripExpenses.createdAt)],
@@ -17,13 +31,28 @@ export async function getExpensesForTrip(tripId: string) {
 }
 
 export async function createExpense(data: unknown) {
+  const userId = await requireCurrentUserId();
   const parsed = expenseSchema.safeParse(data);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message };
   }
   const e = parsed.data;
+  if (!(await ownsTrip(userId, e.tripId))) {
+    return { success: false, error: "Trip not found" };
+  }
+
   const amountPaise = rupeesToPaise(e.amountRupees);
   const walletId = e.walletId || null;
+
+  if (walletId) {
+    const wallet = await db.query.wallets.findFirst({
+      where: and(eq(wallets.id, walletId), eq(wallets.userId, userId)),
+      columns: { id: true },
+    });
+    if (!wallet) {
+      return { success: false, error: "Wallet not found" };
+    }
+  }
 
   let row: typeof tripExpenses.$inferSelect;
 
@@ -115,16 +144,30 @@ export async function updateExpense(
   data: unknown,
   tripId: string
 ) {
+  const userId = await requireCurrentUserId();
+  if (!(await ownsTrip(userId, tripId))) {
+    return { success: false, error: "Trip not found" };
+  }
+
   const parsed = expenseSchema.safeParse(data);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message };
   }
   const e = parsed.data;
   const newAmountPaise = rupeesToPaise(e.amountRupees);
+  if (e.walletId) {
+    const wallet = await db.query.wallets.findFirst({
+      where: and(eq(wallets.id, e.walletId), eq(wallets.userId, userId)),
+      columns: { id: true },
+    });
+    if (!wallet) {
+      return { success: false, error: "Wallet not found" };
+    }
+  }
 
   // Get existing expense to calculate diff
   const existing = await db.query.tripExpenses.findFirst({
-    where: eq(tripExpenses.id, id),
+    where: and(eq(tripExpenses.id, id), eq(tripExpenses.tripId, tripId)),
   });
   if (!existing) return { success: false, error: "Expense not found" };
 
@@ -153,7 +196,7 @@ export async function updateExpense(
       tollName: e.tollName || null,
       ticketRef: e.ticketRef || null,
     })
-    .where(eq(tripExpenses.id, id))
+    .where(and(eq(tripExpenses.id, id), eq(tripExpenses.tripId, tripId)))
     .returning();
 
   // Update trip total with the difference
@@ -171,8 +214,13 @@ export async function deleteExpense(
   id: string,
   tripId: string
 ) {
+  const userId = await requireCurrentUserId();
+  if (!(await ownsTrip(userId, tripId))) {
+    return { success: false, error: "Trip not found" };
+  }
+
   const existing = await db.query.tripExpenses.findFirst({
-    where: eq(tripExpenses.id, id),
+    where: and(eq(tripExpenses.id, id), eq(tripExpenses.tripId, tripId)),
   });
   if (!existing) return { success: false, error: "Expense not found" };
 

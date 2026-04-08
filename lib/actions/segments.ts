@@ -1,12 +1,26 @@
 "use server";
 
-import { sql, eq, asc, desc } from "drizzle-orm";
+import { sql, eq, asc, desc, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { segments, trips } from "@/lib/db/schema";
+import { segments, trips, vehicles } from "@/lib/db/schema";
 import { segmentSchema } from "@/lib/validations/segment";
+import { requireCurrentUserId } from "@/lib/auth/server";
+
+async function ownsTrip(userId: string, tripId: string) {
+  const trip = await db.query.trips.findFirst({
+    where: and(eq(trips.id, tripId), eq(trips.userId, userId)),
+    columns: { id: true },
+  });
+  return Boolean(trip);
+}
 
 export async function getSegmentsForTrip(tripId: string) {
+  const userId = await requireCurrentUserId();
+  if (!(await ownsTrip(userId, tripId))) {
+    return [];
+  }
+
   return db.query.segments.findMany({
     where: eq(segments.tripId, tripId),
     orderBy: [asc(segments.sequenceNumber)],
@@ -15,11 +29,24 @@ export async function getSegmentsForTrip(tripId: string) {
 }
 
 export async function createSegment(data: unknown) {
+  const userId = await requireCurrentUserId();
   const parsed = segmentSchema.safeParse(data);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message };
   }
   const s = parsed.data;
+  if (!(await ownsTrip(userId, s.tripId))) {
+    return { success: false, error: "Trip not found" };
+  }
+  if (s.vehicleId) {
+    const vehicle = await db.query.vehicles.findFirst({
+      where: and(eq(vehicles.id, s.vehicleId), eq(vehicles.userId, userId)),
+      columns: { id: true },
+    });
+    if (!vehicle) {
+      return { success: false, error: "Vehicle not found" };
+    }
+  }
 
   // Auto-increment sequence number
   const existing = await db
@@ -71,11 +98,25 @@ export async function createSegment(data: unknown) {
 }
 
 export async function updateSegment(id: string, data: unknown, tripId: string) {
+  const userId = await requireCurrentUserId();
+  if (!(await ownsTrip(userId, tripId))) {
+    return { success: false, error: "Trip not found" };
+  }
+
   const parsed = segmentSchema.partial().safeParse(data);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message };
   }
   const s = parsed.data;
+  if (s.vehicleId) {
+    const vehicle = await db.query.vehicles.findFirst({
+      where: and(eq(vehicles.id, s.vehicleId), eq(vehicles.userId, userId)),
+      columns: { id: true },
+    });
+    if (!vehicle) {
+      return { success: false, error: "Vehicle not found" };
+    }
+  }
 
   const [row] = await db
     .update(segments)
@@ -101,8 +142,11 @@ export async function updateSegment(id: string, data: unknown, tripId: string) {
       ...(s.pnr !== undefined && { pnr: s.pnr || null }),
       ...(s.notes !== undefined && { notes: s.notes || null }),
     })
-    .where(eq(segments.id, id))
+    .where(and(eq(segments.id, id), eq(segments.tripId, tripId)))
     .returning();
+  if (!row) {
+    return { success: false, error: "Segment not found" };
+  }
 
   revalidatePath(`/trips/${tripId}`);
   return { success: true, data: row };
@@ -117,17 +161,32 @@ export async function patchSegment(
   },
   tripId: string,
 ) {
+  const userId = await requireCurrentUserId();
+  if (!(await ownsTrip(userId, tripId))) {
+    return { success: false, error: "Trip not found" };
+  }
+
   const [row] = await db
     .update(segments)
     .set(data)
-    .where(eq(segments.id, id))
+    .where(and(eq(segments.id, id), eq(segments.tripId, tripId)))
     .returning();
+  if (!row) {
+    return { success: false, error: "Segment not found" };
+  }
   revalidatePath(`/trips/${tripId}`);
   return { success: true, data: row };
 }
 
 export async function deleteSegment(id: string, tripId: string) {
-  await db.delete(segments).where(eq(segments.id, id));
+  const userId = await requireCurrentUserId();
+  if (!(await ownsTrip(userId, tripId))) {
+    return { success: false, error: "Trip not found" };
+  }
+
+  await db
+    .delete(segments)
+    .where(and(eq(segments.id, id), eq(segments.tripId, tripId)));
   revalidatePath(`/trips/${tripId}`);
   return { success: true };
 }

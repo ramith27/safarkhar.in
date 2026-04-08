@@ -145,6 +145,7 @@ export const mealTypeEnum = pgEnum("meal_type", [
 
 export const vehicles = pgTable("vehicles", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: text("user_id").notNull(),
   name: text("name").notNull(),
   type: vehicleTypeEnum("type").notNull(),
   make: text("make"),
@@ -159,6 +160,7 @@ export const vehicles = pgTable("vehicles", {
 
 export const wallets = pgTable("wallets", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: text("user_id").notNull(),
   name: text("name").notNull(),
   type: walletTypeEnum("type").notNull().default("GENERAL"),
   balancePaise: integer("balance_paise").notNull().default(0),
@@ -185,6 +187,7 @@ export const walletTransactions = pgTable("wallet_transactions", {
 
 export const trips = pgTable("trips", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: text("user_id").notNull(),
   title: text("title").notNull(),
   description: text("description"),
   startLocation: text("start_location").notNull(),

@@ -1,36 +1,52 @@
 "use server";
 
-import { sql, eq, desc } from "drizzle-orm";
+import { sql, eq, desc, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { wallets, walletTransactions } from "@/lib/db/schema";
+import { vehicles, wallets, walletTransactions } from "@/lib/db/schema";
 import { walletSchema, topUpSchema } from "@/lib/validations/wallet";
 import { rupeesToPaise } from "@/lib/utils/format";
+import { requireCurrentUserId } from "@/lib/auth/server";
 
 export async function getWallets() {
+  const userId = await requireCurrentUserId();
   return db.query.wallets.findMany({
+    where: eq(wallets.userId, userId),
     orderBy: (w, { asc }) => [asc(w.name)],
     with: { vehicle: true },
   });
 }
 
 export async function getWallet(id: string) {
+  const userId = await requireCurrentUserId();
   return db.query.wallets.findFirst({
-    where: eq(wallets.id, id),
+    where: and(eq(wallets.id, id), eq(wallets.userId, userId)),
     with: { vehicle: true },
   });
 }
 
 export async function createWallet(data: unknown) {
+  const userId = await requireCurrentUserId();
   const parsed = walletSchema.safeParse(data);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message };
   }
   const w = parsed.data;
+  if (w.vehicleId) {
+    const ownedVehicle = await db.query.vehicles.findFirst({
+      where: and(eq(vehicles.id, w.vehicleId), eq(vehicles.userId, userId)),
+      columns: { id: true },
+    });
+    if (!ownedVehicle) {
+      return { success: false, error: "Vehicle not found" };
+    }
+  }
+
   const [row] = await db
     .insert(wallets)
     .values({
+      userId,
       name: w.name,
       type: w.type,
       vehicleId: w.vehicleId || null,
@@ -41,11 +57,22 @@ export async function createWallet(data: unknown) {
 }
 
 export async function updateWallet(id: string, data: unknown) {
+  const userId = await requireCurrentUserId();
   const parsed = walletSchema.safeParse(data);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message };
   }
   const w = parsed.data;
+  if (w.vehicleId) {
+    const ownedVehicle = await db.query.vehicles.findFirst({
+      where: and(eq(vehicles.id, w.vehicleId), eq(vehicles.userId, userId)),
+      columns: { id: true },
+    });
+    if (!ownedVehicle) {
+      return { success: false, error: "Vehicle not found" };
+    }
+  }
+
   const [row] = await db
     .update(wallets)
     .set({
@@ -54,24 +81,36 @@ export async function updateWallet(id: string, data: unknown) {
       vehicleId: w.vehicleId || null,
       updatedAt: new Date(),
     })
-    .where(eq(wallets.id, id))
+    .where(and(eq(wallets.id, id), eq(wallets.userId, userId)))
     .returning();
+  if (!row) {
+    return { success: false, error: "Wallet not found" };
+  }
   revalidatePath("/wallets");
   return { success: true, data: row };
 }
 
 export async function deleteWallet(id: string) {
-  await db.delete(wallets).where(eq(wallets.id, id));
+  const userId = await requireCurrentUserId();
+  await db
+    .delete(wallets)
+    .where(and(eq(wallets.id, id), eq(wallets.userId, userId)));
   revalidatePath("/wallets");
   return { success: true };
 }
 
 export async function topUpWallet(walletId: string, data: unknown) {
+  const userId = await requireCurrentUserId();
   const parsed = topUpSchema.safeParse(data);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message };
   }
   const amountPaise = rupeesToPaise(parsed.data.amountRupees);
+
+  const wallet = await db.query.wallets.findFirst({
+    where: and(eq(wallets.id, walletId), eq(wallets.userId, userId)),
+  });
+  if (!wallet) return { success: false, error: "Wallet not found" };
 
   await db.transaction(async (tx) => {
     await tx.insert(walletTransactions).values({
@@ -115,6 +154,12 @@ export async function debitWalletTx(
 }
 
 export async function getWalletTransactions(walletId: string) {
+  const userId = await requireCurrentUserId();
+  const wallet = await db.query.wallets.findFirst({
+    where: and(eq(wallets.id, walletId), eq(wallets.userId, userId)),
+  });
+  if (!wallet) return [];
+
   return db.query.walletTransactions.findMany({
     where: eq(walletTransactions.walletId, walletId),
     orderBy: [desc(walletTransactions.createdAt)],
@@ -122,10 +167,33 @@ export async function getWalletTransactions(walletId: string) {
 }
 
 export async function getAllWalletTransactions() {
-  return db.query.walletTransactions.findMany({
-    orderBy: [desc(walletTransactions.createdAt)],
-    with: { wallet: true },
-  });
+  const userId = await requireCurrentUserId();
+  return db
+    .select({
+      id: walletTransactions.id,
+      walletId: walletTransactions.walletId,
+      amountPaise: walletTransactions.amountPaise,
+      type: walletTransactions.type,
+      referenceType: walletTransactions.referenceType,
+      referenceId: walletTransactions.referenceId,
+      description: walletTransactions.description,
+      createdAt: walletTransactions.createdAt,
+      wallet: {
+        id: wallets.id,
+        name: wallets.name,
+        type: wallets.type,
+        balancePaise: wallets.balancePaise,
+        currency: wallets.currency,
+        vehicleId: wallets.vehicleId,
+        createdAt: wallets.createdAt,
+        updatedAt: wallets.updatedAt,
+        userId: wallets.userId,
+      },
+    })
+    .from(walletTransactions)
+    .innerJoin(wallets, eq(walletTransactions.walletId, wallets.id))
+    .where(eq(wallets.userId, userId))
+    .orderBy(desc(walletTransactions.createdAt));
 }
 
 const adjustBalanceSchema = z.object({
@@ -134,6 +202,7 @@ const adjustBalanceSchema = z.object({
 });
 
 export async function adjustWalletBalance(walletId: string, data: unknown) {
+  const userId = await requireCurrentUserId();
   const parsed = adjustBalanceSchema.safeParse(data);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message };
@@ -141,7 +210,7 @@ export async function adjustWalletBalance(walletId: string, data: unknown) {
   const newBalancePaise = rupeesToPaise(parsed.data.newBalanceRupees);
 
   const wallet = await db.query.wallets.findFirst({
-    where: eq(wallets.id, walletId),
+    where: and(eq(wallets.id, walletId), eq(wallets.userId, userId)),
   });
   if (!wallet) return { success: false, error: "Wallet not found" };
 

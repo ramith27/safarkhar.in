@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-
-const SESSION_COOKIE = "safarkhar_session";
+import { SESSION_COOKIE } from "@/lib/auth/constants";
 
 /** Routes that require authentication */
 const PROTECTED_PATHS = [

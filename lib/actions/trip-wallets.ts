@@ -1,11 +1,25 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { tripWallets, wallets } from "@/lib/db/schema";
+import { tripWallets, trips, wallets } from "@/lib/db/schema";
+import { requireCurrentUserId } from "@/lib/auth/server";
+
+async function ownsTrip(userId: string, tripId: string) {
+  const trip = await db.query.trips.findFirst({
+    where: and(eq(trips.id, tripId), eq(trips.userId, userId)),
+    columns: { id: true },
+  });
+  return Boolean(trip);
+}
 
 export async function getTripWallets(tripId: string) {
+  const userId = await requireCurrentUserId();
+  if (!(await ownsTrip(userId, tripId))) {
+    return [];
+  }
+
   return db.query.tripWallets.findMany({
     where: eq(tripWallets.tripId, tripId),
     with: { wallet: true },
@@ -13,8 +27,13 @@ export async function getTripWallets(tripId: string) {
 }
 
 export async function assignWalletToTrip(tripId: string, walletId: string) {
+  const userId = await requireCurrentUserId();
+  if (!(await ownsTrip(userId, tripId))) {
+    return { success: false, error: "Trip not found" };
+  }
+
   const wallet = await db.query.wallets.findFirst({
-    where: eq(wallets.id, walletId),
+    where: and(eq(wallets.id, walletId), eq(wallets.userId, userId)),
   });
   if (!wallet) return { success: false, error: "Wallet not found" };
 
@@ -32,7 +51,14 @@ export async function assignWalletToTrip(tripId: string, walletId: string) {
 }
 
 export async function removeWalletFromTrip(tripWalletId: string, tripId: string) {
-  await db.delete(tripWallets).where(eq(tripWallets.id, tripWalletId));
+  const userId = await requireCurrentUserId();
+  if (!(await ownsTrip(userId, tripId))) {
+    return { success: false, error: "Trip not found" };
+  }
+
+  await db
+    .delete(tripWallets)
+    .where(and(eq(tripWallets.id, tripWalletId), eq(tripWallets.tripId, tripId)));
   revalidatePath(`/trips/${tripId}`);
   return { success: true };
 }

@@ -1,13 +1,16 @@
 "use server";
 
-import { sql, eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { trips, tripWallets, wallets } from "@/lib/db/schema";
 import { tripSchema } from "@/lib/validations/trip";
+import { requireCurrentUserId } from "@/lib/auth/server";
 
 export async function getTrips() {
+  const userId = await requireCurrentUserId();
   return db.query.trips.findMany({
+    where: eq(trips.userId, userId),
     orderBy: [desc(trips.createdAt)],
     with: {
       segments: { orderBy: (s, { asc }) => [asc(s.sequenceNumber)] },
@@ -17,8 +20,9 @@ export async function getTrips() {
 }
 
 export async function getTrip(id: string) {
+  const userId = await requireCurrentUserId();
   return db.query.trips.findFirst({
-    where: eq(trips.id, id),
+    where: and(eq(trips.id, id), eq(trips.userId, userId)),
     with: {
       segments: {
         orderBy: (s, { asc }) => [asc(s.sequenceNumber)],
@@ -34,6 +38,7 @@ export async function getTrip(id: string) {
 }
 
 export async function createTrip(data: unknown) {
+  const userId = await requireCurrentUserId();
   const parsed = tripSchema.safeParse(data);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message };
@@ -43,6 +48,7 @@ export async function createTrip(data: unknown) {
   const [trip] = await db
     .insert(trips)
     .values({
+      userId,
       title: t.title,
       description: t.description || null,
       startLocation: t.startLocation,
@@ -61,7 +67,7 @@ export async function createTrip(data: unknown) {
     const walletRows = await db
       .select({ id: wallets.id, balancePaise: wallets.balancePaise })
       .from(wallets)
-      .where(inArray(wallets.id, t.walletIds));
+      .where(and(inArray(wallets.id, t.walletIds), eq(wallets.userId, userId)));
 
     if (walletRows.length > 0) {
       await db.insert(tripWallets).values(
@@ -80,6 +86,7 @@ export async function createTrip(data: unknown) {
 }
 
 export async function updateTrip(id: string, data: unknown) {
+  const userId = await requireCurrentUserId();
   const parsed = tripSchema.partial().safeParse(data);
   if (!parsed.success) {
     return { success: false, error: parsed.error.issues[0]?.message };
@@ -99,8 +106,11 @@ export async function updateTrip(id: string, data: unknown) {
       ...(t.primaryMode !== undefined && { primaryMode: t.primaryMode ?? null }),
       updatedAt: new Date(),
     })
-    .where(eq(trips.id, id))
+    .where(and(eq(trips.id, id), eq(trips.userId, userId)))
     .returning();
+  if (!row) {
+    return { success: false, error: "Trip not found" };
+  }
   revalidatePath(`/trips/${id}`);
   revalidatePath("/trips");
   return { success: true, data: row };
@@ -114,6 +124,7 @@ export async function startTrip(
     initialDisplayedRangeKm?: number | null;
   }
 ) {
+  const userId = await requireCurrentUserId();
   const [row] = await db
     .update(trips)
     .set({
@@ -123,8 +134,11 @@ export async function startTrip(
       ...(opts?.initialBatteryPct != null && { initialBatteryPct: opts.initialBatteryPct }),
       ...(opts?.initialDisplayedRangeKm != null && { initialDisplayedRangeKm: opts.initialDisplayedRangeKm }),
     })
-    .where(eq(trips.id, id))
+    .where(and(eq(trips.id, id), eq(trips.userId, userId)))
     .returning();
+  if (!row) {
+    return { success: false, error: "Trip not found" };
+  }
   revalidatePath(`/trips/${id}`);
   revalidatePath("/trips");
   revalidatePath("/");
@@ -132,6 +146,14 @@ export async function startTrip(
 }
 
 export async function endTrip(id: string) {
+  const userId = await requireCurrentUserId();
+  const trip = await db.query.trips.findFirst({
+    where: and(eq(trips.id, id), eq(trips.userId, userId)),
+  });
+  if (!trip) {
+    return { success: false, error: "Trip not found" };
+  }
+
   // Snapshot current wallet balances at trip end
   const tripWalletRows = await db.query.tripWallets.findMany({
     where: eq(tripWallets.tripId, id),
@@ -151,7 +173,7 @@ export async function endTrip(id: string) {
       status: "COMPLETED",
       updatedAt: new Date(),
     })
-    .where(eq(trips.id, id))
+    .where(and(eq(trips.id, id), eq(trips.userId, userId)))
     .returning();
 
   revalidatePath(`/trips/${id}`);
@@ -161,7 +183,8 @@ export async function endTrip(id: string) {
 }
 
 export async function deleteTrip(id: string) {
-  await db.delete(trips).where(eq(trips.id, id));
+  const userId = await requireCurrentUserId();
+  await db.delete(trips).where(and(eq(trips.id, id), eq(trips.userId, userId)));
   revalidatePath("/trips");
   revalidatePath("/");
   return { success: true };

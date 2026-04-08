@@ -10,8 +10,7 @@ import {
   type UserCredential,
 } from "firebase/auth";
 import { auth } from "./config";
-
-const SESSION_COOKIE = "safarkhar_session";
+import { SESSION_COOKIE } from "@/lib/auth/constants";
 
 /** Persist the Firebase ID token as a plain cookie for middleware. */
 async function persistSession(credential: UserCredential) {
