@@ -9,6 +9,7 @@ const PROTECTED_PATHS = [
   "/vehicles",
   "/wallets",
   "/reports",
+  "/activity",
 ];
 
 /** Public paths that authenticated users should be redirected away from */
