@@ -1,0 +1,1 @@
+ALTER TABLE "trips" ADD COLUMN "primary_mode" "transport_mode";
