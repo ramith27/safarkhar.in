@@ -40,7 +40,7 @@ export default function RegisterPage() {
     try {
       await registerWithEmail(email, password, name.trim());
       toast.success("Account created! Welcome to Safarkhar 🎉");
-      router.push("/dashboard");
+      window.location.href = "/dashboard";
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "";
       const friendly = msg.includes("email-already-in-use")
@@ -58,7 +58,7 @@ export default function RegisterPage() {
     setGoogleLoading(true);
     try {
       await loginWithGoogle();
-      router.push("/dashboard");
+      window.location.href = "/dashboard";
     } catch (err: unknown) {
       if (err instanceof Error && err.message.includes("popup-closed-by-user")) {
         // user cancelled — no toast

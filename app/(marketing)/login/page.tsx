@@ -26,7 +26,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await loginWithEmail(email, password);
-      router.push(next);
+      window.location.href = next;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "";
       const friendly = msg.includes("invalid-credential")
@@ -44,7 +44,7 @@ export default function LoginPage() {
     setGoogleLoading(true);
     try {
       await loginWithGoogle();
-      router.push(next);
+      window.location.href = next;
     } catch (err: unknown) {
       if (err instanceof Error && err.message.includes("popup-closed-by-user")) {
         // user cancelled — no toast
