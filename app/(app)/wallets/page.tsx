@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { getWallets } from "@/lib/actions/wallets";
 import { WalletsClient } from "@/components/wallets/wallets-client";
 

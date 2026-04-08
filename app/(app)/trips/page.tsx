@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import { getTrips } from "@/lib/actions/trips";
 import { formatRupees, tripStatusColor, transportModeIcon, transportModeLabel } from "@/lib/utils/format";

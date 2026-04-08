@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { getTrip } from "@/lib/actions/trips";
 import { getWallets } from "@/lib/actions/wallets";
 import { getSegmentsForTrip } from "@/lib/actions/segments";

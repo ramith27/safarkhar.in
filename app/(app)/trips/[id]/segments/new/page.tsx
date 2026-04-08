@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { getTrip } from "@/lib/actions/trips";
 import { getVehicles } from "@/lib/actions/vehicles";
 import { AddSegmentForm } from "@/components/trips/add-segment-form";

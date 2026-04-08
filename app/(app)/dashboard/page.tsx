@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import { getTrips } from "@/lib/actions/trips";
 import { getWallets } from "@/lib/actions/wallets";

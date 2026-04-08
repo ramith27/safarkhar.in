@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { getAllWalletTransactions } from "@/lib/actions/wallets";
 import { formatRupees } from "@/lib/utils/format";
 import { Badge } from "@/components/ui/badge";

@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { getWallets } from "@/lib/actions/wallets";
 import { CreateTripWizard } from "@/components/trips/create-trip-wizard";
 

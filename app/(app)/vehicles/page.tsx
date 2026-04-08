@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { getVehicles } from "@/lib/actions/vehicles";
 import { VehiclesClient } from "@/components/vehicles/vehicles-client";
 
